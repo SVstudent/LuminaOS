@@ -229,7 +229,7 @@ Reply with ONLY a brief description of the image to generate (e.g. "A parabola g
     try {
       // Extract conversation content
       const conversationText = transcriptions
-        .map(t => `${t.role}: ${t.text}`)
+        .map((t: { role: string; text: string }) => `${t.role}: ${t.text}`)
         .join('\n');
 
       console.log('[LUMINA] Compiling resources from conversation...');
@@ -286,7 +286,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             assignmentId: 'voice-session',
             startTime: sessionStartTimeRef.current,
             lastActive: Date.now(),
-            messages: transcriptions.map(t => ({
+            messages: transcriptions.map((t: { role: string; text: string }) => ({
               role: t.role === 'model' ? 'assistant' : 'user',
               content: t.text,
               timestamp: Date.now()
@@ -329,11 +329,11 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
     }
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track: MediaStreamTrack) => track.stop());
       streamRef.current = null;
     }
 
-    sourcesRef.current.forEach(source => {
+    sourcesRef.current.forEach((source: AudioBufferSourceNode) => {
       try { source.stop(); } catch (e) { /* ignore */ }
     });
     sourcesRef.current.clear();
@@ -388,7 +388,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             const scriptProcessor = inputAudioCtxRef.current!.createScriptProcessor(4096, 1, 1);
             scriptProcessorRef.current = scriptProcessor;
 
-            scriptProcessor.onaudioprocess = (e) => {
+            scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
               // Only send audio if session is still active
               if (!isActiveRef.current || !sessionRef.current) return;
 
@@ -461,7 +461,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
               imageGeneratedRef.current = false; // Reset for new turn
               analyzeAndGenerateImage(fullIn, fullOut);
 
-              setTranscriptions(prev => [
+              setTranscriptions((prev: { role: 'user' | 'model', text: string }[]) => [
                 ...prev,
                 { role: 'user' as const, text: fullIn },
                 { role: 'model' as const, text: fullOut.replace(/\[BOARD:\{.*?\}\]/g, '').replace(/\[IMAGE:[^\]]+\]/g, '') }
@@ -474,7 +474,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             }
 
             // Audio Playback logic
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio && outputAudioCtxRef.current) {
               const ctx = outputAudioCtxRef.current;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
@@ -506,7 +506,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             }
 
             if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
+              sourcesRef.current.forEach((s: AudioBufferSourceNode) => s.stop());
               sourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               outputTranscriptRef.current = '';
@@ -555,9 +555,9 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
         try { sessionRef.current.close(); } catch (e) { /* ignore */ }
       }
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach((track: MediaStreamTrack) => track.stop());
       }
-      sourcesRef.current.forEach(source => {
+      sourcesRef.current.forEach((source: AudioBufferSourceNode) => {
         try { source.stop(); } catch (e) { /* ignore */ }
       });
     };
