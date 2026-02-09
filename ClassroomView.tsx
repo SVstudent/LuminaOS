@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Classroom, ClassTab, Announcement, Assignment, User, UserRole, Message, Attachment, RubricCriterion, ClassroomState, Topic, ClassRubric, LuminaTutorSession, StudentAIAnalytics } from './types';
+import { Classroom, ClassTab, Announcement, Assignment, User, UserRole, Message, Attachment, RubricCriterion, ClassroomState, Topic, ClassRubric, LuminaTutorSession, StudentAIAnalytics, AIGradingInsight } from './types';
 import { GoogleGenAI } from "@google/genai";
-import SocraticChat from './SocraticChat';
+import LuminaSync from './LuminaSync';
 import TeacherAssistant from './TeacherAssistant';
 import { marked } from 'marked';
 import {
@@ -17,6 +17,9 @@ import {
   updateStudentAIAnalytics,
   getClassroomLuminaSessions,
   getClassroomRubric,
+  saveAIGradingInsight,
+  subscribeToClassroomAIGradingInsights,
+  subscribeToClassroomLuminaSessions,
 } from './lib/firestore';
 
 interface ClassroomViewProps {
@@ -81,15 +84,13 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ classroom, currentUser, s
 
   const [showCreateWorkDropdown, setShowCreateWorkDropdown] = useState(false);
 
-  // Student AI Help & Auto-Grade States
-  const [showAiHelp, setShowAiHelp] = useState(false);
-  const [aiHelpMessages, setAiHelpMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [aiHelpInput, setAiHelpInput] = useState('');
-  const [isAiHelpLoading, setIsAiHelpLoading] = useState(false);
+  // Student Auto-Grade & Analytics States
   const [autoGradeResult, setAutoGradeResult] = useState<{ score: string; feedback: string; criteriaScores: Array<{ name: string; score: number; maxScore: number; feedback: string }> } | null>(null);
   const [isAutoGrading, setIsAutoGrading] = useState(false);
-  const [currentAiSession, setCurrentAiSession] = useState<{ startTime: number; lastActive: number; messages: any[] } | null>(null);
   const [luminaSessions, setLuminaSessions] = useState<LuminaTutorSession[]>([]);
+  const [aiGradingInsights, setAiGradingInsights] = useState<AIGradingInsight[]>([]);
+  const aiHelpEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isTeacher = currentUser.role === UserRole.TEACHER;
   const { announcements = [], assignments = [], topics = [], rubric } = state || {};
@@ -101,19 +102,25 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ classroom, currentUser, s
     }
   }, [notification]);
 
+
   useEffect(() => {
-    if (activeTab === 'GRADES' && isTeacher) {
-      const fetchSessions = async () => {
-        try {
-          const sessions = await getClassroomLuminaSessions(classroom.id);
-          setLuminaSessions(sessions);
-        } catch (err) {
-          console.error("Error fetching sessions:", err);
-        }
-      };
-      fetchSessions();
-    }
-  }, [activeTab, isTeacher, classroom.id]);
+    if (!classroom.id || !isTeacher) return;
+
+    // Subscribe to AI Grading Insights in real-time
+    const unsubInsights = subscribeToClassroomAIGradingInsights(classroom.id, (insights) => {
+      setAiGradingInsights(insights);
+    });
+
+    // Subscribe to Lumina Sessions in real-time
+    const unsubSessions = subscribeToClassroomLuminaSessions(classroom.id, (sessions) => {
+      setLuminaSessions(sessions);
+    });
+
+    return () => {
+      unsubInsights();
+      unsubSessions();
+    };
+  }, [classroom.id, isTeacher]);
 
   const handlePostAnnouncement = async () => {
     if (!announcementText.trim()) return;
@@ -347,6 +354,31 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ classroom, currentUser, s
     setNotification(`New ${type} attached.`);
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!viewingWorkId || !e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    const isImage = file.type.startsWith('image/');
+
+    // Simulate file upload by creating a local URL
+    const fileUrl = URL.createObjectURL(file);
+
+    const newAttachment: Attachment = {
+      id: `file-${Date.now()}`,
+      type: isImage ? 'image' : 'file',
+      title: file.name,
+      url: fileUrl,
+    };
+
+    onUpdate({
+      assignments: assignments.map(a => a.id === viewingWorkId ? { ...a, attachments: [...(a.attachments || []), newAttachment] } : a)
+    });
+    setShowCreateWorkDropdown(false);
+    setNotification(`${file.name} uploaded.`);
+
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const updateAttachmentContent = (assignmentId: string, attachmentId: string, content: string) => {
     onUpdate({
       assignments: assignments.map(a => a.id === assignmentId ? {
@@ -381,136 +413,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ classroom, currentUser, s
     setNotification("Unsubmitted.");
   };
 
-  // AI Socratic Help - guides student without giving answers
-  const handleAiHelp = async (assignment: Assignment, question: string, isAutoAnalyze = false) => {
-    // If not auto-analyze and no question, do nothing
-    if (!isAutoAnalyze && !question.trim()) return;
-
-    const timestamp = Date.now();
-    const newUserMessage = isAutoAnalyze ? null : { role: 'user', content: question, timestamp };
-
-    if (newUserMessage) {
-      setAiHelpMessages(prev => [...prev, newUserMessage as any]);
-      setAiHelpInput('');
-    }
-
-    setIsAiHelpLoading(true);
-
-    try {
-      const workContent = assignment.attachments?.map(a => `${a.title}:\n${a.content || ''}`).join('\n\n') || '';
-      const hasWork = workContent.trim().length > 0;
-
-      const prompt = isAutoAnalyze
-        ? `You are a Socratic study buddy helping a student. Look at their assignment and current work, then give advice.
-
-ASSIGNMENT: ${assignment.title}
-DESCRIPTION: ${assignment.description}
-${assignment.points ? `POINTS: ${assignment.points}` : ''}
-${assignment.dueDate ? `DUE: ${assignment.dueDate}` : ''}
-
-STUDENT'S CURRENT WORK:
-${hasWork ? workContent : '(Not started yet)'}
-
-${hasWork
-          ? `Review their work so far. In 2-3 sentences: identify what's good, note ONE area to improve, and ask ONE guiding question to help them think deeper. Be encouraging!`
-          : `They haven't started yet. In 2-3 sentences: help them understand what the assignment is asking, suggest where to begin, and ask ONE guiding question to get them thinking. Be encouraging!`
-        }
-
-DO NOT give answers. Guide them with questions.`
-        : `You are a Socratic tutor helping a student with their assignment. 
-
-ASSIGNMENT: ${assignment.title}
-DESCRIPTION: ${assignment.description}
-STUDENT'S CURRENT WORK: ${workContent || '(not started yet)'}
-
-STUDENT'S QUESTION: ${question}
-
-IMPORTANT RULES:
-1. NEVER give the answer directly. Guide them to discover it themselves.
-2. Ask probing questions to help them think through the problem.
-3. If they're stuck, give hints, not solutions.
-4. Encourage them and point out what they're doing right.
-5. Keep responses concise (2-3 sentences max).
-
-Respond as a helpful, encouraging Socratic tutor:`;
-
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-
-      const data = await response.json();
-      const assistantMessage = { role: 'assistant', content: data.response || "Let me help you think through this. What part is confusing you the most?", timestamp: Date.now() };
-
-      setAiHelpMessages(prev => [...prev, assistantMessage as any]);
-
-      // Update session state
-      setCurrentAiSession(prev => {
-        const newMessages = [...(prev?.messages || [])];
-        if (newUserMessage) newMessages.push(newUserMessage);
-        newMessages.push(assistantMessage);
-        return {
-          startTime: prev?.startTime || timestamp,
-          lastActive: Date.now(),
-          messages: newMessages
-        };
-      });
-
-    } catch (error) {
-      setAiHelpMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting. Try asking again!", timestamp: Date.now() } as any]);
-    }
-
-    setIsAiHelpLoading(false);
-  };
-
-  // Toggle AI help panel and auto-analyze
-  const toggleAiHelp = async (assignment: Assignment) => {
-    if (!showAiHelp) {
-      // Opening - clear messages and auto-analyze
-      setAiHelpMessages([]);
-      setShowAiHelp(true);
-      setCurrentAiSession({
-        startTime: Date.now(),
-        lastActive: Date.now(),
-        messages: []
-      });
-      handleAiHelp(assignment, '', true);
-    } else {
-      // Closing - persist session if there are messages
-      if (currentAiSession && currentAiSession.messages.length > 0) {
-        try {
-          // Generate quick summary/mastery update
-          const sessionSummary = currentAiSession.messages
-            .filter(m => m.role === 'assistant')
-            .slice(-1)[0]?.content.substring(0, 100) + '...';
-
-          await saveLuminaSession({
-            studentId: currentUser.id,
-            studentName: currentUser.name,
-            classroomId: classroom.id,
-            assignmentId: assignment.id,
-            startTime: currentAiSession.startTime,
-            lastActive: currentAiSession.lastActive,
-            messages: currentAiSession.messages,
-            summary: "Socratic help session about " + assignment.title,
-            engagementScore: Math.min(10, currentAiSession.messages.length)
-          });
-
-          await updateStudentAIAnalytics(currentUser.id, classroom.id, {
-            totalSessions: 1, // Will be incremented or handled by update logic if improved
-            totalQuestions: currentAiSession.messages.filter(m => m.role === 'user').length,
-          });
-
-          setNotification("AI session saved to your learning progress.");
-        } catch (err) {
-          console.error("Failed to save AI session:", err);
-        }
-      }
-      setShowAiHelp(false);
-      setCurrentAiSession(null);
-    }
-  };
 
   // Auto-grade against class rubric
   const handleAutoGrade = async (assignment: Assignment) => {
@@ -523,17 +425,20 @@ Respond as a helpful, encouraging Socratic tutor:`;
     setAutoGradeResult(null);
 
     try {
-      const workContent = assignment.attachments.map(a => `${a.title}:\n${a.content || '(empty)'}`).join('\n\n');
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
+        throw new Error("AI Credentials not found.");
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
+
+      const workContent = assignment.attachments.map(a => `${a.title} (${a.type}):\n${a.content || '(External/File attachment)'}`).join('\n\n');
 
       const rubricText = rubric.criteria.map(c =>
         `${c.name} (${c.maxPoints} pts): ${c.description}\nLevels: ${c.levels.map(l => `${l.score}pts - ${l.description}`).join('; ')}`
       ).join('\n\n');
 
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `You are grading a student's work against a specific rubric. Be fair, encouraging, and constructive.
+      const prompt = `You are grading a student's work against a specific rubric. Be fair, encouraging, and constructive.
 
 ASSIGNMENT: ${assignment.title}
 DESCRIPTION: ${assignment.description}
@@ -553,21 +458,39 @@ Grade the work against EACH rubric criterion. Return a JSON object with this exa
   ]
 }
 
-Be encouraging but honest. If work is incomplete, note what's missing. Return ONLY valid JSON.`
-        })
+Be encouraging but honest. If work is incomplete or uses external files that cannot be read, provide feedback based on what IS present. Return ONLY valid JSON.`;
+
+      const result = await genAI.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
 
-      const data = await response.json();
+      const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
       let parsed;
       try {
-        const jsonMatch = data.response.match(/\{[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : data.response);
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
       } catch {
-        parsed = { score: "Unable to grade", feedback: "Please add more content to your work.", criteriaScores: [] };
+        parsed = { score: "Unable to grade", feedback: "The AI had trouble formatting your results. Please try again with more detailed content.", criteriaScores: [] };
       }
 
       setAutoGradeResult(parsed);
+
+      // Save insight for Teacher analytics
+      if (parsed.score !== "Unable to grade") {
+        saveAIGradingInsight({
+          studentId: currentUser.id,
+          studentName: currentUser.name,
+          assignmentId: assignment.id,
+          classroomId: classroom.id,
+          score: parsed.score,
+          feedback: parsed.feedback,
+          criteriaScores: parsed.criteriaScores
+        }).catch(err => console.error("[AutoGrade] Failed to save insight:", err));
+      }
     } catch (error) {
+      console.error("[AutoGrade] Error:", error);
       setAutoGradeResult({ score: "Error", feedback: "Couldn't connect to grading service. Try again.", criteriaScores: [] });
     }
 
@@ -685,7 +608,11 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
               <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-sm shadow-slate-100">
                 <h5 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4">Upcoming</h5>
                 {assignments.filter(a => a.status === 'assigned').slice(0, 2).map(a => (
-                  <div key={a.id} className="mb-4 last:mb-0 group cursor-pointer">
+                  <div
+                    key={a.id}
+                    onClick={() => { setActiveTab('CLASSWORK'); setViewingWorkId(a.id); }}
+                    className="mb-4 last:mb-0 group cursor-pointer"
+                  >
                     <p className="text-[13px] font-bold text-slate-700 truncate leading-tight group-hover:text-indigo-600 transition-colors">{a.title}</p>
                     <p className="text-[11px] text-slate-500 font-medium mt-1">Due {a.dueDate}</p>
                   </div>
@@ -916,6 +843,74 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
                         <>
                           <h4 className="text-[14px] font-bold text-[#3c4043]">Your Answer</h4>
                           <textarea disabled={isSubmitted} value={submissionText} onChange={e => setSubmissionText(e.target.value)} className="w-full min-h-[200px] p-6 bg-white border border-[#dadce0] rounded-lg outline-none focus:border-[#1e8e3e] text-[14px] transition-all" placeholder="Type your final response here..." />
+
+                          {/* AI Study Tools Relocated Here */}
+                          <div className="border-t border-slate-100 pt-8 mt-8">
+                            <div className="flex items-center gap-3 mb-6">
+                              <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+                                <span className="text-xl">✨</span>
+                              </div>
+                              <div>
+                                <span className="text-[11px] font-black text-indigo-600 uppercase tracking-[0.2em] block">Lumina AI Study Buddy</span>
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Knowledge Analysis & Feedback</span>
+                              </div>
+                              <div className="h-[1px] flex-1 bg-gradient-to-r from-indigo-100 to-transparent ml-4"></div>
+                            </div>
+
+                            <div className="max-w-md">
+                              <button
+                                onClick={() => handleAutoGrade(as)}
+                                disabled={isAutoGrading}
+                                className="w-full py-5 bg-white border-2 border-emerald-50 hover:border-emerald-200 text-emerald-700 hover:shadow-xl hover:shadow-emerald-50 rounded-[2rem] flex items-center justify-center gap-4 transition-all duration-500 active:scale-95 disabled:opacity-50"
+                              >
+                                {isAutoGrading ? (
+                                  <div className="w-6 h-6 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                )}
+                                <span className="text-[13px] font-black uppercase tracking-widest">{isAutoGrading ? 'Synthesizing Feedback...' : 'Analyze My Progress'}</span>
+                              </button>
+                            </div>
+
+                            {/* Auto-Grade Result */}
+                            {autoGradeResult && (
+                              <div className="bg-white border-2 border-amber-100 rounded-[2.5rem] p-8 mt-8 shadow-xl shadow-amber-50 animate-in slide-in-from-bottom-4 duration-500">
+                                <div className="flex justify-between items-center mb-6">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600">
+                                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                    </div>
+                                    <p className="text-[14px] font-black text-amber-800 uppercase tracking-widest">Cognitive Progress Check</p>
+                                  </div>
+                                  <div className="px-6 py-2 bg-amber-600 text-white rounded-full font-black text-lg shadow-lg shadow-amber-100">
+                                    {autoGradeResult.score}
+                                  </div>
+                                </div>
+                                <p className="text-[15px] font-medium text-amber-900/80 leading-relaxed mb-6 bg-amber-50/50 p-6 rounded-[1.5rem] border border-amber-50">
+                                  {autoGradeResult.feedback}
+                                </p>
+                                {autoGradeResult.criteriaScores?.length > 0 && (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {autoGradeResult.criteriaScores.map((c, idx) => (
+                                      <div key={idx} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
+                                        <div className="flex justify-between items-center mb-2">
+                                          <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{c.name}</span>
+                                          <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-black">{c.score}/{c.maxScore}</span>
+                                        </div>
+                                        <p className="text-[12px] text-slate-600 font-medium leading-relaxed">{c.feedback}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => setAutoGradeResult(null)}
+                                  className="w-full mt-6 py-4 text-[12px] font-black text-amber-600 hover:bg-amber-50 rounded-[1.5rem] transition-colors border-2 border-transparent hover:border-amber-100 uppercase tracking-[0.2em]"
+                                >
+                                  Dismiss Analysis
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </>
                       )}
                     </div>
@@ -939,172 +934,79 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
                               </button>
                               {showCreateWorkDropdown && (
                                 <div className="absolute top-full left-0 w-full mt-1 bg-white border border-[#dadce0] rounded shadow-xl z-20 py-2">
+                                  <button onClick={() => fileInputRef.current?.click()} className="w-full px-4 py-2 text-left text-[14px] hover:bg-gray-100 flex items-center gap-3 transition-colors">
+                                    <div className="w-6 h-6 bg-gray-500 rounded flex items-center justify-center text-white font-bold text-[10px]">F</div> Upload File
+                                  </button>
+                                  <div className="h-[1px] bg-gray-100 my-1"></div>
                                   <button onClick={() => handleCreateWork('doc')} className="w-full px-4 py-2 text-left text-[14px] hover:bg-gray-100 flex items-center gap-3 transition-colors"><div className="w-6 h-6 bg-[#4285f4] rounded flex items-center justify-center text-white font-bold text-[10px]">D</div> Google Docs</button>
                                   <button onClick={() => handleCreateWork('slide')} className="w-full px-4 py-2 text-left text-[14px] hover:bg-gray-100 flex items-center gap-3 transition-colors"><div className="w-6 h-6 bg-[#f4b400] rounded flex items-center justify-center text-white font-bold text-[10px]">S</div> Google Slides</button>
                                   <button onClick={() => handleCreateWork('sheet')} className="w-full px-4 py-2 text-left text-[14px] hover:bg-gray-100 flex items-center gap-3 transition-colors"><div className="w-6 h-6 bg-[#0f9d58] rounded flex items-center justify-center text-white font-bold text-[10px]">X</div> Google Sheets</button>
                                 </div>
                               )}
+                              <input
+                                type="file"
+                                ref={fileInputRef}
+                                className="hidden"
+                                onChange={handleFileUpload}
+                              />
                             </div>
                             {as.attachments?.map(att => (
-                              <button key={att.id} onClick={() => { setEditingAttachment({ assignmentId: as.id, attachmentId: att.id }); setIsEditorPreview(true); }} className="w-full p-3 border rounded-lg flex items-center gap-3 hover:bg-gray-50 text-left transition-colors">
-                                <div className={`w-8 h-8 rounded flex items-center justify-center text-white font-black text-[10px] ${att.type === 'doc' ? 'bg-[#4285f4]' : att.type === 'slide' ? 'bg-[#f4b400]' : 'bg-[#0f9d58]'}`}>{att.type[0].toUpperCase()}</div>
-                                <span className="text-[13px] font-bold truncate flex-1 text-[#3c4043]">{att.title}</span>
-                              </button>
+                              <div key={att.id} className="relative group/att">
+                                <button onClick={() => { setEditingAttachment({ assignmentId: as.id, attachmentId: att.id }); setIsEditorPreview(true); }} className="w-full p-3 border rounded-lg flex items-center gap-3 hover:bg-gray-50 text-left transition-colors">
+                                  <div className={`w-8 h-8 rounded flex items-center justify-center text-white font-black text-[10px] ${att.type === 'doc' ? 'bg-[#4285f4]' :
+                                    att.type === 'slide' ? 'bg-[#f4b400]' :
+                                      att.type === 'sheet' ? 'bg-[#0f9d58]' :
+                                        att.type === 'image' ? 'bg-indigo-500' : 'bg-gray-500'
+                                    }`}>
+                                    {att.type === 'image' ? (
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" /></svg>
+                                    ) : att.type[0].toUpperCase()}
+                                  </div>
+                                  <span className="text-[13px] font-bold truncate flex-1 text-[#3c4043]">{att.title}</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdate({
+                                      assignments: assignments.map(a => a.id === as.id ? { ...a, attachments: a.attachments?.filter(t => t.id !== att.id) } : a)
+                                    });
+                                  }}
+                                  className="absolute -top-2 -right-2 w-5 h-5 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:border-red-100 shadow-sm opacity-0 group-hover/att:opacity-100 transition-all z-10"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                              </div>
                             ))}
                             <button onClick={() => hasAttachments ? setShowTurnInConfirm(true) : handleMarkAsDone(as.id)} className="w-full bg-[#1e8e3e] text-white py-3 rounded font-bold text-[14px] shadow-sm hover:bg-[#188038] transition-all">
                               {hasAttachments ? 'Turn in' : 'Mark as done'}
                             </button>
 
-                            {/* AI Study Tools - Sleeker Design */}
-                            <div className="border-t border-[#e8eaed] pt-4 mt-3">
-                              <div className="flex items-center justify-center gap-2 mb-3">
-                                <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">✨ AI Study Buddy</span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                {/* Study Help Button */}
-                                <button
-                                  onClick={() => toggleAiHelp(as)}
-                                  className={`py-2.5 text-[11px] font-bold rounded-lg flex flex-col items-center justify-center gap-1 transition-all ${showAiHelp
-                                    ? 'bg-purple-600 text-white shadow-md'
-                                    : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
-                                    }`}
-                                >
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                                  {showAiHelp ? 'Hide' : 'Get Help'}
-                                </button>
-
-                                {/* Check Work Button */}
-                                <button
-                                  onClick={() => handleAutoGrade(as)}
-                                  disabled={isAutoGrading}
-                                  className="py-2.5 text-[11px] font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg flex flex-col items-center justify-center gap-1 transition-all disabled:opacity-50"
-                                >
-                                  {isAutoGrading ? (
-                                    <span className="animate-spin text-[16px]">⏳</span>
-                                  ) : (
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                  )}
-                                  {isAutoGrading ? 'Checking...' : 'Check Work'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* AI Study Tools Panel */}
-                            <div className="border-t border-slate-100 pt-6 mt-6">
-                              <div className="flex items-center gap-2 mb-4">
-                                <span className="text-[11px] font-black text-indigo-600 uppercase tracking-[0.2em]">Lumina AI Study Buddy</span>
-                                <div className="h-[1px] flex-1 bg-gradient-to-r from-indigo-100 to-transparent"></div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3">
-                                <button
-                                  onClick={() => toggleAiHelp(as)}
-                                  className={`py-4 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all duration-300 active:scale-95 ${showAiHelp
-                                    ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-200'
-                                    : 'bg-indigo-50 text-indigo-700 hover:bg-white hover:shadow-md border border-indigo-100'
-                                    }`}
-                                >
-                                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                                  <span className="text-[11px] font-black uppercase tracking-widest">{showAiHelp ? 'Close' : 'Study Help'}</span>
-                                </button>
-
-                                <button
-                                  onClick={() => handleAutoGrade(as)}
-                                  disabled={isAutoGrading}
-                                  className="py-4 bg-emerald-50 text-emerald-700 hover:bg-white hover:shadow-md border border-emerald-100 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-                                >
-                                  {isAutoGrading ? (
-                                    <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                                  ) : (
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                  )}
-                                  <span className="text-[11px] font-black uppercase tracking-widest">{isAutoGrading ? 'Checking...' : 'Check Progress'}</span>
-                                </button>
-                              </div>
-                            </div>
-
-                            {showAiHelp && (
-                              <div className="bg-white border border-indigo-100 rounded-3xl shadow-2xl mt-4 overflow-hidden animate-in zoom-in-95 duration-300">
-                                <div className="bg-gradient-to-r from-indigo-600 to-violet-700 px-4 py-3 flex items-center justify-between">
-                                  <p className="text-[12px] text-white font-black uppercase tracking-wider flex items-center gap-2">
-                                    <span className="text-base text-white/80">✨</span> Socratic AI Assistant
+                            {/* Turn-in Confirmation Modal */}
+                            {showTurnInConfirm && (
+                              <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+                                <div className="bg-white rounded-[2.5rem] p-10 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-300 border border-slate-100">
+                                  <div className="w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center text-emerald-600 mx-auto mb-8 shadow-inner">
+                                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                  </div>
+                                  <h3 className="text-2xl font-black text-slate-800 text-center mb-4 tracking-tight">Turn in your work?</h3>
+                                  <p className="text-slate-500 text-center mb-10 font-medium leading-relaxed">
+                                    One attachment will be submitted for "{as.title}". You can always unsubmit if you need to make more changes.
                                   </p>
-                                  <div className="flex gap-1">
-                                    <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-pulse"></div>
-                                    <div className="w-1.5 h-1.5 bg-white/60 rounded-full animate-pulse delay-75"></div>
-                                    <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse delay-150"></div>
-                                  </div>
-                                </div>
-                                <div className="p-4">
-                                  <div className="max-h-[220px] overflow-y-auto space-y-3 mb-4 custom-scrollbar">
-                                    {aiHelpMessages.length === 0 && !isAiHelpLoading && (
-                                      <div className="text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                                        <p className="text-[11px] text-slate-400 font-bold uppercase tracking-tighter">I'm ready to help you master this topic.</p>
-                                      </div>
-                                    )}
-                                    {aiHelpMessages.map((msg, idx) => (
-                                      <div key={idx} className={`p-4 rounded-2xl text-[13px] font-medium leading-relaxed ${msg.role === 'user'
-                                        ? 'bg-slate-100 text-slate-800 ml-6'
-                                        : 'bg-indigo-50/50 text-indigo-900 mr-4 border-l-4 border-indigo-500 shadow-sm'
-                                        }`}>
-                                        {msg.content}
-                                      </div>
-                                    ))}
-                                    {isAiHelpLoading && (
-                                      <div className="flex items-center gap-3 p-3 bg-indigo-50/30 rounded-2xl mr-4 border-l-4 border-indigo-300">
-                                        <div className="flex gap-1.5">
-                                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                                        </div>
-                                        <span className="text-[11px] text-indigo-600 font-bold uppercase tracking-widest">Synthesizing...</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <input
-                                      type="text"
-                                      value={aiHelpInput}
-                                      onChange={(e) => setAiHelpInput(e.target.value)}
-                                      onKeyDown={(e) => e.key === 'Enter' && handleAiHelp(as, aiHelpInput)}
-                                      placeholder="Type your message..."
-                                      className="flex-1 px-4 py-3 text-[13px] font-medium bg-slate-100/50 border-2 border-transparent rounded-2xl focus:outline-none focus:border-indigo-500/20 focus:bg-white transition-all shadow-inner"
-                                    />
+                                  <div className="flex flex-col gap-3">
                                     <button
-                                      onClick={() => handleAiHelp(as, aiHelpInput)}
-                                      disabled={isAiHelpLoading || !aiHelpInput.trim()}
-                                      className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100 hover:bg-indigo-700 disabled:opacity-40 transition-all active:scale-90"
+                                      onClick={() => handleTurnIn(as.id)}
+                                      className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95"
                                     >
-                                      <svg className="w-5 h-5 rotate-90" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+                                      Confirm Submission
+                                    </button>
+                                    <button
+                                      onClick={() => setShowTurnInConfirm(false)}
+                                      className="w-full py-5 text-slate-400 font-black uppercase tracking-widest hover:text-slate-600 transition-colors"
+                                    >
+                                      Not yet
                                     </button>
                                   </div>
                                 </div>
-                              </div>
-                            )}
-
-                            {/* Auto-Grade Result */}
-                            {autoGradeResult && (
-                              <div className="bg-gradient-to-b from-amber-50 to-white border border-amber-200 rounded-lg p-3 mt-2">
-                                <div className="flex justify-between items-center mb-2">
-                                  <p className="text-[12px] font-bold text-amber-800">📊 Progress Check</p>
-                                  <span className="text-[14px] font-bold text-amber-600">{autoGradeResult.score}</span>
-                                </div>
-                                <p className="text-[11px] text-amber-700 mb-2">{autoGradeResult.feedback}</p>
-                                {autoGradeResult.criteriaScores?.length > 0 && (
-                                  <div className="space-y-1">
-                                    {autoGradeResult.criteriaScores.map((c, idx) => (
-                                      <div key={idx} className="text-[10px] bg-white p-2 rounded border">
-                                        <div className="flex justify-between font-medium">
-                                          <span className="text-[#3c4043]">{c.name}</span>
-                                          <span className="text-amber-600">{c.score}/{c.maxScore}</span>
-                                        </div>
-                                        <p className="text-gray-500 mt-1">{c.feedback}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                <button onClick={() => setAutoGradeResult(null)} className="w-full mt-2 text-[11px] text-amber-600 hover:underline">Dismiss</button>
                               </div>
                             )}
                           </>
@@ -1124,7 +1026,7 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
                   </div>
                 </div>
               </div>
-            </div>
+            </div >
           );
         }
 
@@ -1288,7 +1190,7 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
             })()}
           </div>
         );
-      case 'AURA':
+      case 'LUMINA':
         // Teachers see TeacherAssistant, Students see SocraticChat
         if (isTeacher) {
           return (
@@ -1304,7 +1206,7 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
         }
         return (
           <div className="max-w-[1000px] mx-auto mt-8 h-[80vh] flex flex-col bg-white rounded-xl border border-[#dadce0] shadow-sm overflow-hidden px-4 mb-8">
-            <SocraticChat embedded classroom={classroom} currentUser={currentUser} />
+            <LuminaSync embedded classroom={classroom} currentUser={currentUser} />
           </div>
         );
       case 'PEOPLE':
@@ -1457,33 +1359,63 @@ Be encouraging but honest. If work is incomplete, note what's missing. Return ON
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Recent Lumina Sessions</h4>
                     <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                      {luminaSessions.length === 0 ? (
+                      {luminaSessions.length === 0 && aiGradingInsights.length === 0 ? (
                         <div className="text-center py-12 bg-gray-50 rounded-lg border border-dashed">
-                          <p className="text-gray-400 text-sm">No AI sessions recorded yet.</p>
+                          <p className="text-gray-400 text-sm">No AI interactions recorded yet.</p>
                         </div>
                       ) : (
-                        luminaSessions.map(session => (
-                          <div key={session.id} className="p-3 border rounded-lg hover:border-purple-300 transition-all hover:shadow-md bg-white group cursor-pointer">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center gap-2">
-                                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${session.studentName}`} className="w-6 h-6 rounded-full" />
-                                <span className="text-[13px] font-bold text-[#3c4043]">{session.studentName}</span>
-                              </div>
-                              <span className="text-[10px] text-gray-400">{new Date(session.startTime).toLocaleString()}</span>
+                        <div className="space-y-6">
+                          {/* Voice Sessions */}
+                          {luminaSessions.length > 0 && (
+                            <div className="space-y-3">
+                              {luminaSessions.map(session => (
+                                <div key={session.id} className="p-3 border rounded-lg hover:border-purple-300 transition-all hover:shadow-md bg-white group cursor-pointer border-l-4 border-l-purple-400">
+                                  <div className="flex justify-between items-start mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${session.studentName}`} className="w-6 h-6 rounded-full" />
+                                      <span className="text-[13px] font-bold text-[#3c4043]">{session.studentName} <span className="text-purple-500 font-medium ml-1">Synced</span></span>
+                                    </div>
+                                    <span className="text-[10px] text-gray-400">{new Date(session.startTime).toLocaleString()}</span>
+                                  </div>
+                                  <p className="text-[12px] text-purple-700 font-medium mb-1 line-clamp-1">{session.summary}</p>
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] border ${(session.engagementScore || 0) > 7 ? 'bg-green-50 text-green-600 border-green-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
+                                      Engagement: {session.engagementScore}/10
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                            <p className="text-[12px] text-purple-700 font-medium mb-1 line-clamp-1">{session.summary}</p>
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {session.messages.length > 0 && (
-                                <span className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full text-[10px] border border-purple-100 italic">
-                                  {session.messages.filter(m => m.role === 'user').length} questions asked
-                                </span>
-                              )}
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] border ${(session.engagementScore || 0) > 7 ? 'bg-green-50 text-green-600 border-green-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                                Engagement: {session.engagementScore}/10
-                              </span>
+                          )}
+
+                          {/* Grading Insights */}
+                          {aiGradingInsights.length > 0 && (
+                            <div className="space-y-3">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">AI Grading Checks</h5>
+                              {aiGradingInsights.map(insight => {
+                                const assignment = assignments.find(a => a.id === insight.assignmentId);
+                                return (
+                                  <div key={insight.id} className="p-3 border rounded-lg hover:border-indigo-300 transition-all hover:shadow-md bg-white group cursor-pointer border-l-4 border-l-indigo-400">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${insight.studentName}`} className="w-6 h-6 rounded-full" />
+                                        <span className="text-[13px] font-bold text-[#3c4043]">{insight.studentName} <span className="text-indigo-500 font-medium ml-1">Autograde</span></span>
+                                      </div>
+                                      <span className="text-[10px] text-gray-400">{new Date(insight.timestamp).toLocaleString()}</span>
+                                    </div>
+                                    <p className="text-[11px] font-bold text-slate-600 mb-1">Assignment: {assignment?.title || 'Unknown'}</p>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-lg text-[12px] font-black border border-indigo-100 shadow-sm">
+                                        Score: {insight.score}
+                                      </span>
+                                    </div>
+                                    <p className="text-[12px] text-slate-500 line-clamp-2 italic">"{insight.feedback}"</p>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          </div>
-                        ))
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

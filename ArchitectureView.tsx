@@ -5,7 +5,7 @@ const ArchitectureView: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-12 pb-24 animate-in fade-in duration-700">
       <div className="text-center space-y-4">
-        <h1 className="text-5xl font-black tracking-tighter bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent italic">AURA ACADEMY BLUEPRINT</h1>
+        <h1 className="text-5xl font-black tracking-tighter bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent italic">LUMINAOS BLUEPRINT</h1>
         <p className="text-sm font-mono text-white/30 uppercase tracking-[0.5em]">Systems Architecture v2.5 / Gemini 3 Integrated</p>
       </div>
 
@@ -15,15 +15,15 @@ const ArchitectureView: React.FC = () => {
           <div className="prose prose-invert max-w-none">
             <h3 className="text-violet-400">1.1 Pedagogical Shift: From Answer-Seeking to Concept-Mastery</h3>
             <p>
-              Aura Academy represents a fundamental pivot from "File Repository" LMS systems to a "Reasoning Partner" OS. 
-              By leveraging Gemini 3's native <strong>Chain-of-Thought</strong> capabilities, the system monitors 
-              the student's logic flow in real-time, refusing to provide final answers while providing 
+              LuminaOS represents a fundamental pivot from "File Repository" LMS systems to a "Reasoning Partner" OS.
+              By leveraging Gemini 3's native <strong>Chain-of-Thought</strong> capabilities, the system monitors
+              the student's logic flow in real-time, refusing to provide final answers while providing
               "Cognitive Scaffolding" to help them bridge their own knowledge gaps.
             </p>
             <h3 className="text-violet-400">1.2 Social Impact: Democratizing Elite Tutoring</h3>
             <p>
-              Every student, regardless of socio-economic status, receives a world-class Socratic mentor. 
-              This mentor possesses an infinite memory of the student's progress, understanding precisely 
+              Every student, regardless of socio-economic status, receives a world-class Socratic mentor.
+              This mentor possesses an infinite memory of the student's progress, understanding precisely
               where they struggle with conceptual leaps (e.g., from Algebra to Calculus).
             </p>
           </div>
@@ -67,11 +67,11 @@ const ArchitectureView: React.FC = () => {
               </div>
             </div>
             <div className="w-48 h-48 border border-white/10 rounded-full flex items-center justify-center relative">
-               <div className="absolute inset-0 bg-violet-500/10 blur-[40px] rounded-full"></div>
-               <div className="text-center">
-                 <span className="text-2xl font-black">99.9%</span>
-                 <p className="text-[10px] uppercase font-bold text-white/40">Uptime</p>
-               </div>
+              <div className="absolute inset-0 bg-violet-500/10 blur-[40px] rounded-full"></div>
+              <div className="text-center">
+                <span className="text-2xl font-black">99.9%</span>
+                <p className="text-[10px] uppercase font-bold text-white/40">Uptime</p>
+              </div>
             </div>
           </div>
         </div>

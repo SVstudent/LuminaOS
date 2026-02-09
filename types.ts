@@ -59,7 +59,7 @@ export interface RubricCriterion {
 
 export interface Attachment {
   id: string;
-  type: 'doc' | 'slide' | 'sheet' | 'link';
+  type: 'doc' | 'slide' | 'sheet' | 'link' | 'file' | 'image';
   title: string;
   url: string;
   content?: string; // Stateful content for mock editor
@@ -156,4 +156,21 @@ export interface StudentAIAnalytics {
   lastActive: number;
   topTopics: string[];
   conceptMastery: Record<string, number>; // concept -> mastery level 0-1
+}
+
+export interface AIGradingInsight {
+  id: string;
+  studentId: string;
+  studentName: string;
+  assignmentId: string;
+  classroomId: string;
+  score: string;
+  feedback: string;
+  criteriaScores: Array<{
+    name: string;
+    score: number;
+    maxScore: number;
+    feedback: string;
+  }>;
+  timestamp: number;
 }

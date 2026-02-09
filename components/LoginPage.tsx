@@ -42,24 +42,24 @@ export default function LoginPage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-blue-50">
-                <div className="w-12 h-12 border-4 border-[#1e8e3e] border-t-transparent rounded-full animate-spin" />
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-violet-50">
+                <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-white to-blue-50 p-2 py-4">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-violet-50 p-2 py-4">
             <div className="w-full max-w-sm">
                 {/* Logo & Branding */}
                 <div className="text-center mb-4">
-                    <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-br from-[#1e8e3e] to-[#34a853] rounded-xl shadow-lg mb-2">
+                    <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-xl shadow-xl shadow-indigo-100 mb-2">
                         <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z" />
                         </svg>
                     </div>
-                    <h1 className="text-2xl font-bold text-gray-800">Aura Academy</h1>
-                    <p className="text-gray-500 text-sm">AI-Powered Learning Platform</p>
+                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">LuminaOS</h1>
+                    <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.2em]">AI-Native Education OS</p>
                 </div>
 
                 {/* Auth Card */}
@@ -87,7 +87,7 @@ export default function LoginPage() {
                                     type="text"
                                     value={displayName}
                                     onChange={(e) => setDisplayName(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e8e3e]/20 focus:border-[#1e8e3e] transition-all text-sm"
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-sm"
                                     placeholder="Prof. Gauss or Alex Johnson"
                                     required
                                 />
@@ -128,23 +128,23 @@ export default function LoginPage() {
                                         type="button"
                                         onClick={() => setRole(UserRole.STUDENT)}
                                         className={`p-2.5 rounded-lg border-2 transition-all ${role === UserRole.STUDENT
-                                            ? 'border-[#1e8e3e] bg-green-50 text-[#1e8e3e]'
-                                            : 'border-gray-200 hover:border-gray-300'
+                                            ? 'border-indigo-600 bg-indigo-50 text-indigo-600'
+                                            : 'border-slate-100 hover:border-slate-200'
                                             }`}
                                     >
                                         <div className="text-lg">🎓</div>
-                                        <div className="font-medium text-sm">Student</div>
+                                        <div className="font-bold text-sm">Student</div>
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setRole(UserRole.TEACHER)}
                                         className={`p-2.5 rounded-lg border-2 transition-all ${role === UserRole.TEACHER
-                                            ? 'border-[#1e8e3e] bg-green-50 text-[#1e8e3e]'
-                                            : 'border-gray-200 hover:border-gray-300'
+                                            ? 'border-indigo-600 bg-indigo-50 text-indigo-600'
+                                            : 'border-slate-100 hover:border-slate-200'
                                             }`}
                                     >
                                         <div className="text-lg">👨‍🏫</div>
-                                        <div className="font-medium text-sm">Teacher</div>
+                                        <div className="font-bold text-sm">Teacher</div>
                                     </button>
                                 </div>
                             </div>
@@ -153,7 +153,7 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={isSubmitting}
-                            className="w-full py-2.5 bg-[#1e8e3e] text-white rounded-lg font-bold text-sm hover:bg-[#188038] transition-all shadow-md shadow-green-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-violet-700 text-white rounded-lg font-black text-sm hover:shadow-lg hover:shadow-indigo-200 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             {isSubmitting ? (
                                 <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
@@ -195,7 +195,7 @@ export default function LoginPage() {
                                 setIsSignUp(!isSignUp);
                                 clearError();
                             }}
-                            className="text-[#1e8e3e] font-medium hover:underline"
+                            className="text-indigo-600 font-bold hover:underline"
                         >
                             {isSignUp ? 'Sign In' : 'Sign Up'}
                         </button>

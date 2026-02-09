@@ -5,8 +5,9 @@ import { Classroom, User } from './types';
 import { MASTER_TUTOR_PROMPT } from './constants';
 import TutorWhiteboard, { TutorWhiteboardHandle, WhiteboardCommand } from './TutorWhiteboard';
 import SessionSummary from './SessionSummary';
+import { saveLuminaSession } from './lib/firestore';
 
-interface SocraticChatProps {
+interface LuminaSyncProps {
   embedded?: boolean;
   onClose?: () => void;
   classroom?: Classroom;
@@ -81,7 +82,7 @@ function parseImageCommands(text: string): string[] {
   return prompts;
 }
 
-const SocraticChat: React.FC<SocraticChatProps> = ({ embedded, onClose, classroom, currentUser }) => {
+const LuminaSync: React.FC<LuminaSyncProps> = ({ embedded, onClose, classroom, currentUser }) => {
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [transcriptions, setTranscriptions] = useState<{ role: 'user' | 'model', text: string }[]>([]);
@@ -122,7 +123,7 @@ const SocraticChat: React.FC<SocraticChatProps> = ({ embedded, onClose, classroo
       return;
     }
 
-    console.log('[AURA] Generating image:', prompt);
+    console.log('[LUMINA] Generating image:', prompt);
     const startTime = Date.now();
     try {
       // Simplified prompt for faster generation
@@ -140,13 +141,13 @@ const SocraticChat: React.FC<SocraticChatProps> = ({ embedded, onClose, classroo
           return; // Only render first image
         }
         if (part.text) {
-          console.log('[AURA] Image generation text response:', part.text);
+          console.log('[LUMINA] Image generation text response:', part.text);
         }
       }
 
-      console.warn('[AURA] No image data found in response:', response);
+      console.warn('[LUMINA] No image data found in response:', response);
     } catch (err) {
-      console.error('[AURA] Image generation failed:', err);
+      console.error('[LUMINA] Image generation failed:', err);
     }
   };
 
@@ -157,9 +158,9 @@ const SocraticChat: React.FC<SocraticChatProps> = ({ embedded, onClose, classroo
   const analyzeAndGenerateImage = async (userText: string, modelText: string) => {
     if (!aiClientRef.current || imageGeneratedRef.current) return;
 
-    console.log('[AURA] Analyzing conversation for visual needs...');
-    console.log('[AURA] User said:', userText);
-    console.log('[AURA] Model said:', modelText);
+    console.log('[LUMINA] Analyzing conversation for visual needs...');
+    console.log('[LUMINA] User said:', userText);
+    console.log('[LUMINA] Model said:', modelText);
 
     // Check if the conversation mentions visuals/diagrams/graphs
     const fullConvo = (userText + ' ' + modelText).toLowerCase();
@@ -168,7 +169,7 @@ const SocraticChat: React.FC<SocraticChatProps> = ({ embedded, onClose, classroo
     const needsVisual = visualKeywords.some(kw => fullConvo.includes(kw));
 
     if (!needsVisual) {
-      console.log('[AURA] No visual content detected in conversation');
+      console.log('[LUMINA] No visual content detected in conversation');
       return;
     }
 
@@ -187,10 +188,10 @@ Reply with ONLY a brief description of the image to generate (e.g. "A parabola g
       });
 
       const analysisText = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      console.log('[AURA] Image analysis result:', analysisText);
+      console.log('[LUMINA] Image analysis result:', analysisText);
 
       if (analysisText.toUpperCase().includes('NONE') || analysisText.length < 5) {
-        console.log('[AURA] Analysis says no image needed');
+        console.log('[LUMINA] Analysis says no image needed');
         return;
       }
 
@@ -198,7 +199,7 @@ Reply with ONLY a brief description of the image to generate (e.g. "A parabola g
       await generateCanvasImage(analysisText.trim());
 
     } catch (err) {
-      console.error('[AURA] Image analysis failed:', err);
+      console.error('[LUMINA] Image analysis failed:', err);
     }
   };
 
@@ -212,7 +213,7 @@ Reply with ONLY a brief description of the image to generate (e.g. "A parabola g
   // Compile resources at end of session using Gemini + Google Search
   const compileResources = useCallback(async () => {
     if (!aiClientRef.current || transcriptions.length === 0) {
-      console.log('[AURA] No transcript to compile resources from');
+      console.log('[LUMINA] No transcript to compile resources from');
       return;
     }
 
@@ -231,7 +232,7 @@ Reply with ONLY a brief description of the image to generate (e.g. "A parabola g
         .map(t => `${t.role}: ${t.text}`)
         .join('\n');
 
-      console.log('[AURA] Compiling resources from conversation...');
+      console.log('[LUMINA] Compiling resources from conversation...');
 
       // Use Gemini with Google Search to find real resources
       const response = await aiClientRef.current.models.generateContent({
@@ -267,7 +268,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
       });
 
       const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      console.log('[AURA] Resource response:', text);
+      console.log('[LUMINA] Resource response:', text);
 
       // Parse JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -275,10 +276,32 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
         const data = JSON.parse(jsonMatch[0]);
         setSessionTopics(data.topics || []);
         setSessionResources(data.resources || []);
-        console.log('[AURA] Compiled', data.resources?.length || 0, 'resources');
+
+        // Save session to Firestore for Analytics
+        if (classroom?.id && currentUser?.id) {
+          saveLuminaSession({
+            studentId: currentUser.id,
+            studentName: currentUser.name,
+            classroomId: classroom.id,
+            assignmentId: 'voice-session',
+            startTime: sessionStartTimeRef.current,
+            lastActive: Date.now(),
+            messages: transcriptions.map(t => ({
+              role: t.role === 'model' ? 'assistant' : 'user',
+              content: t.text,
+              timestamp: Date.now()
+            })),
+            summary: data.topics?.join(', ') || 'Lumina Tutoring Session',
+            topicsCovered: data.topics || [],
+            resourcesCompiled: data.resources?.map((r: any) => r.url) || [],
+            engagementScore: Math.min(10, Math.ceil(transcriptions.length / 2))
+          }).catch(err => console.error('[LUMINA] Failed to save session:', err));
+        }
+
+        console.log('[LUMINA] Compiled', data.resources?.length || 0, 'resources');
       }
     } catch (err) {
-      console.error('[AURA] Failed to compile resources:', err);
+      console.error('[LUMINA] Failed to compile resources:', err);
       setSessionTopics(['Session Complete']);
       setSessionResources([]);
     } finally {
@@ -287,7 +310,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
   }, [transcriptions]);
 
   const stopSession = useCallback(() => {
-    console.log('[AURA] Stopping session...');
+    console.log('[LUMINA] Stopping session...');
     isActiveRef.current = false;
 
     // Disconnect audio processing first
@@ -300,7 +323,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
       try {
         sessionRef.current.close();
       } catch (e) {
-        console.warn('[AURA] Error closing session:', e);
+        console.warn('[LUMINA] Error closing session:', e);
       }
       sessionRef.current = null;
     }
@@ -383,7 +406,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
               try {
                 sessionRef.current?.sendRealtimeInput({ media: pcmBlob });
               } catch (err) {
-                console.warn('[AURA] Error sending audio:', err);
+                console.warn('[LUMINA] Error sending audio:', err);
               }
             };
 
@@ -491,7 +514,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             }
           },
           onclose: (event: any) => {
-            console.log('[AURA] WebSocket closed:', {
+            console.log('[LUMINA] WebSocket closed:', {
               code: event?.code,
               reason: event?.reason,
               wasClean: event?.wasClean
@@ -504,7 +527,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
             }
           },
           onerror: (e) => {
-            console.error('[AURA] WebSocket error:', e);
+            console.error('[LUMINA] WebSocket error:', e);
             isActiveRef.current = false;
             setIsActive(false);
             setIsConnecting(false);
@@ -522,7 +545,7 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
   // Cleanup on unmount only
   useEffect(() => {
     return () => {
-      console.log('[AURA] Component unmounting, cleaning up...');
+      console.log('[LUMINA] Component unmounting, cleaning up...');
       isActiveRef.current = false;
 
       if (scriptProcessorRef.current) {
@@ -594,10 +617,15 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
                 <div className="space-y-6 animate-in fade-in zoom-in-95 duration-700">
                   {/* Voice Orb */}
                   <div className="relative mx-auto">
-                    <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center border border-emerald-500/30 shadow-[0_0_30px_rgba(37,166,103,0.1)]">
-                      <div className="w-12 h-1 bg-emerald-400 rounded-full animate-voice-bar-center"></div>
+                    <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center border border-emerald-500/30 shadow-[0_0_40px_rgba(37,166,103,0.15)] gap-1.5 px-4 backdrop-blur-md">
+                      <div className="flex-1 w-1.5 bg-emerald-400 rounded-full animate-voice-wave" style={{ animationDelay: '0ms' }}></div>
+                      <div className="flex-1 w-1.5 bg-emerald-400 rounded-full animate-voice-wave" style={{ animationDelay: '200ms' }}></div>
+                      <div className="flex-1 w-1.5 bg-emerald-400 rounded-full animate-voice-wave" style={{ animationDelay: '400ms', height: '100%' }}></div>
+                      <div className="flex-1 w-1.5 bg-emerald-400 rounded-full animate-voice-wave" style={{ animationDelay: '200ms' }}></div>
+                      <div className="flex-1 w-1.5 bg-emerald-400 rounded-full animate-voice-wave" style={{ animationDelay: '0ms' }}></div>
                     </div>
-                    <div className="absolute -inset-3 bg-emerald-500/5 rounded-full animate-ping-slow"></div>
+                    <div className="absolute -inset-4 bg-emerald-500/10 rounded-full animate-pulse-slow"></div>
+                    <div className="absolute -inset-8 bg-emerald-500/5 rounded-full animate-ping-slow"></div>
                   </div>
 
                   <div className="space-y-1">
@@ -684,19 +712,28 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
         .mask-fade-top {
           mask-image: linear-gradient(to top, black 80%, transparent 100%);
         }
-        @keyframes voice-bar-center {
-          0%, 100% { transform: scaleX(0.5); opacity: 0.3; }
-          50% { transform: scaleX(2.5); opacity: 1; }
+        @keyframes voice-wave {
+          0%, 100% { transform: scaleY(0.3); opacity: 0.4; }
+          50% { transform: scaleY(1.5); opacity: 1; }
         }
-        .animate-voice-bar-center {
-          animation: voice-bar-center 1s ease-in-out infinite;
+        .animate-voice-wave {
+          animation: voice-wave 1.2s ease-in-out infinite;
+          transform-origin: center;
+          height: 16px;
+        }
+        @keyframes pulse-slow {
+          0%, 100% { transform: scale(1); opacity: 0.1; }
+          50% { transform: scale(1.1); opacity: 0.2; }
+        }
+        .animate-pulse-slow {
+          animation: pulse-slow 3s ease-in-out infinite;
         }
         @keyframes ping-slow {
-          0% { transform: scale(1); opacity: 0.1; }
-          100% { transform: scale(1.5); opacity: 0; }
+          0% { transform: scale(1); opacity: 0.2; }
+          100% { transform: scale(2); opacity: 0; }
         }
         .animate-ping-slow {
-          animation: ping-slow 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+          animation: ping-slow 4s cubic-bezier(0, 0, 0.2, 1) infinite;
         }
       `}</style>
 
@@ -719,4 +756,4 @@ IMPORTANT: Only include real, working URLs. Prefer well-known educational sites.
   );
 };
 
-export default SocraticChat;
+export default LuminaSync;

@@ -5,18 +5,18 @@ import { MASTER_TUTOR_PROMPT } from './constants';
 const SystemPromptView: React.FC = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-24">
-       <div>
+      <div>
         <h2 className="text-3xl font-bold tracking-tight mb-2 italic uppercase tracking-tighter">The Master Reasoning Prompt</h2>
-        <p className="text-white/50">This 1,000+ word system instruction defines the entire pedagogical DNA of Aura Academy. It turns a generic LLM into a targeted Socratic Mentor.</p>
+        <p className="text-white/50">This 1,000+ word system instruction defines the entire pedagogical DNA of LuminaOS. It turns a generic LLM into a targeted Socratic Mentor.</p>
       </div>
 
       <div className="glass rounded-3xl border border-white/10 overflow-hidden">
         <div className="bg-white/5 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-            <span className="text-xs font-mono font-bold text-white/60">AURA_SOCRATIC_V1_CORE.PROMPT</span>
+            <span className="text-xs font-mono font-bold text-white/60">LUMINA_SOCRATIC_V1_CORE.PROMPT</span>
           </div>
-          <button 
+          <button
             onClick={() => navigator.clipboard.writeText(MASTER_TUTOR_PROMPT)}
             className="text-[10px] font-bold text-white/40 hover:text-white transition-colors"
           >

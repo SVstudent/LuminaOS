@@ -17,7 +17,7 @@ import {
     DocumentReference,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { Classroom, Assignment, Announcement, Topic, UserRole, ClassRubric, LuminaTutorSession, StudentAIAnalytics } from '../types';
+import { Classroom, Assignment, Announcement, Topic, UserRole, ClassRubric, LuminaTutorSession, StudentAIAnalytics, AIGradingInsight } from '../types';
 
 // ==================== USERS ====================
 
@@ -368,9 +368,18 @@ export async function getClassroomRubric(classroomId: string): Promise<ClassRubr
 export async function saveLuminaSession(session: Omit<LuminaTutorSession, 'id'>): Promise<string> {
     const docRef = await addDoc(collection(db, 'lumina_sessions'), {
         ...session,
-        timestamp: serverTimestamp(),
+        startTime: serverTimestamp(),
+        lastActive: serverTimestamp()
     });
     return docRef.id;
+}
+
+export async function updateLuminaSession(sessionId: string, sessionData: Partial<LuminaTutorSession>): Promise<void> {
+    const docRef = doc(db, 'lumina_sessions', sessionId);
+    await updateDoc(docRef, {
+        ...sessionData,
+        lastActive: serverTimestamp(),
+    });
 }
 
 export async function getClassroomLuminaSessions(classroomId: string): Promise<LuminaTutorSession[]> {
@@ -381,6 +390,18 @@ export async function getClassroomLuminaSessions(classroomId: string): Promise<L
     );
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LuminaTutorSession));
+}
+
+export function subscribeToClassroomLuminaSessions(classroomId: string, callback: (sessions: LuminaTutorSession[]) => void) {
+    const q = query(
+        collection(db, 'lumina_sessions'),
+        where('classroomId', '==', classroomId),
+        orderBy('startTime', 'desc')
+    );
+    return onSnapshot(q, (snapshot) => {
+        const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LuminaTutorSession));
+        callback(sessions);
+    });
 }
 
 export async function updateStudentAIAnalytics(studentId: string, classroomId: string, sessionData: Partial<StudentAIAnalytics>): Promise<void> {
@@ -405,4 +426,54 @@ export async function updateStudentAIAnalytics(studentId: string, classroomId: s
             ...sessionData
         });
     }
+}
+
+// ==================== AI GRADING INSIGHTS ====================
+
+export async function saveAIGradingInsight(insight: Omit<AIGradingInsight, 'id' | 'timestamp'>): Promise<string> {
+    const docRef = await addDoc(collection(db, 'ai_grading_insights'), {
+        ...insight,
+        timestamp: serverTimestamp(),
+    });
+    return docRef.id;
+}
+
+export async function getClassroomAIGradingInsights(classroomId: string): Promise<AIGradingInsight[]> {
+    const q = query(
+        collection(db, 'ai_grading_insights'),
+        where('classroomId', '==', classroomId),
+        orderBy('timestamp', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            id: doc.id,
+            ...data,
+            timestamp: data.timestamp?.toMillis() || Date.now()
+        } as AIGradingInsight;
+    });
+}
+
+export function subscribeToClassroomAIGradingInsights(
+    classroomId: string,
+    callback: (insights: AIGradingInsight[]) => void
+) {
+    const q = query(
+        collection(db, 'ai_grading_insights'),
+        where('classroomId', '==', classroomId),
+        orderBy('timestamp', 'desc')
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const insights = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                timestamp: data.timestamp?.toMillis() || Date.now()
+            } as AIGradingInsight;
+        });
+        callback(insights);
+    });
 }

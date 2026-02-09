@@ -5,7 +5,8 @@ import { AppView, Classroom, UserRole, ClassroomState, Assignment, Announcement,
 import Dashboard from './Dashboard';
 import ClassroomView from './ClassroomView';
 import Sidebar from './Sidebar';
-import SocraticChat from './SocraticChat';
+import LuminaChat from './LuminaChat';
+import LuminaSync from './LuminaSync';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './components/LoginPage';
 import {
@@ -283,7 +284,7 @@ function AppContent() {
       {isGlobalChatOpen && (
         <div className="fixed inset-0 z-[200] flex justify-end bg-black/10 pointer-events-none">
           <div className="w-full max-w-sm h-full bg-white shadow-2xl animate-in slide-in-from-right duration-300 pointer-events-auto">
-            <SocraticChat onClose={() => setIsGlobalChatOpen(false)} classroom={selectedClassroom} currentUser={currentUser} />
+            <LuminaChat onClose={() => setIsGlobalChatOpen(false)} classroom={selectedClassroom || undefined} currentUser={currentUser} />
           </div>
         </div>
       )}
@@ -310,7 +311,7 @@ function AppContent() {
             <button
               onClick={() => setIsGlobalChatOpen(!isGlobalChatOpen)}
               className={`p-2.5 rounded-xl transition-all ${isGlobalChatOpen ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-500 hover:bg-slate-100'}`}
-              title="Lumina Help"
+              title="Lumina AI Chat"
             >
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2 22l5-1.338c1.47.851 3.179 1.338 5 1.338 5.523 0 10-4.477 10-10S17.523 2 12 2z" /></svg>
             </button>
