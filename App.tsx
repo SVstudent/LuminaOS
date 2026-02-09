@@ -166,7 +166,7 @@ function AppContent() {
             assignments: assignments.map(mapFirestoreAssignment),
             announcements: announcements.map(mapFirestoreAnnouncement),
             topics: topics.map(mapFirestoreTopic),
-            auraMessages: [],
+            luminaMessages: [],
             rubric: rubric || undefined,
           }
         }));
@@ -179,7 +179,7 @@ function AppContent() {
             assignments: [],
             announcements: [],
             topics: [{ id: 'default', name: 'General', order: 1, collapsed: false }],
-            auraMessages: [],
+            luminaMessages: [],
           }
         }));
       }

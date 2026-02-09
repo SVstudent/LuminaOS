@@ -169,7 +169,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ classroom, currentUser, s
         dueDate: editForm.dueDate || (createType === 'material' ? '' : 'No due date'),
         topicId: editForm.topic || topics[0]?.id || '',
         status: editForm.scheduledDate ? 'scheduled' : 'assigned',
-        type: createType === 'topic' ? 'assignment' : createType,
+        type: (createType as string) === 'topic' ? 'assignment' : createType,
         points: createType === 'material' ? null : editForm.points,
         scheduledDate: editForm.scheduledDate || null,
         attachments: wsPreview ? [{
