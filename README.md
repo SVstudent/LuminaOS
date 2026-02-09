@@ -14,6 +14,16 @@
 
 ---
 
+## 🎯 The Problem
+
+Education is facing a crisis of scale. **One teacher cannot personally tutor 30+ students.** Research consistently shows that 1-on-1 tutoring produces 2 standard deviations of improvement (Bloom's 2 Sigma Problem), but it's economically impossible to provide every student with a dedicated tutor.
+
+Existing EdTech solutions fail because they treat AI as a bolt-on feature — a chatbot stuffed into a sidebar. Students don't engage with text-only interfaces the way they engage with a real conversation. Teachers get no visibility into what students are actually struggling with.
+
+**LuminaOS solves this by making AI the operating system of education itself** — not an add-on, but the foundation.
+
+---
+
 ## Overview
 
 LuminaOS is a premium, AI-native education platform that fundamentally reimagines how students learn and how teachers teach. It replaces static LMS tools with a **living, intelligent system** where every interaction is powered by Google's Gemini 3 AI — from voice-native Socratic tutoring to real-time teacher analytics.
@@ -207,6 +217,83 @@ LuminaOS/
 | 👨‍🏫 Teacher | `darwinteach@gmail.com` | `password` |
 
 These are also available as **click-to-autofill** buttons on the login page.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client ["React 19 Frontend"]
+        UI["UI Components"]
+        LS["Lumina Sync\n(Voice Tutoring)"]
+        LC["Lumina Chat\n(Text Tutoring)"]
+        TA["Teacher Assistant"]
+        AH["Analytics Hub"]
+    end
+
+    subgraph Gemini3 ["Google Gemini 3"]
+        NA["Native Audio\n(Voice Model)"]
+        FL["Flash\n(Text Model)"]
+        IG["Image Generation\n(Whiteboard)"]
+        GS["Google Search\n(Grounding)"]
+    end
+
+    subgraph Firebase ["Firebase"]
+        FS[("Firestore\n(Real-time DB)")]
+        FA["Auth\n(Google OAuth)"]
+        FH["Hosting\n(CDN)"]
+    end
+
+    LS -->|"WebSocket"| NA
+    LS -->|"Image prompts"| IG
+    LC -->|"Chat requests"| FL
+    TA -->|"Content generation"| FL
+    LS -->|"Resource discovery"| GS
+
+    LS & LC & TA & AH <-->|"onSnapshot"| FS
+    UI -->|"Auth state"| FA
+    Client -->|"Static deploy"| FH
+```
+
+---
+
+## 💡 Innovation & Wow Factor
+
+LuminaOS introduces several novel approaches that don't exist in current EdTech:
+
+| Innovation | Why It Matters |
+|------------|----------------|
+| **Voice-First AI Tutoring** | No education platform uses Gemini 3's native audio for real-time Socratic dialogue. Students speak naturally — no typing, no friction. |
+| **AI-to-Whiteboard Pipeline** | Gemini 3 generates educational diagrams live during voice conversations. The AI doesn't just speak — it draws. |
+| **Transparent AI Analytics** | Every AI-student interaction is fully visible to teachers in real-time. No black-box tutoring. Teachers see topics, engagement scores, and transcripts instantly. |
+| **Dual-Persona AI System** | Students get a Socratic tutor; teachers get a content-creation assistant. Same platform, role-aware AI. |
+| **Zero-Config Resource Discovery** | Google Search Grounding automatically finds verified educational resources after every session — no manual curation needed. |
+
+---
+
+## 🌍 Potential Impact
+
+- **1.6 billion students** worldwide lack access to quality 1-on-1 tutoring
+- LuminaOS democratizes the **2 Sigma advantage** — AI tutoring that adapts to each student, available 24/7
+- **Teachers don't lose control** — they gain superpowers. Full visibility into AI interactions means they know exactly where students struggle
+- **Scalable to any classroom size** — whether 5 students or 500, every student gets a personal AI tutor
+- **Language-agnostic** — Gemini 3's native audio works across languages, breaking accessibility barriers
+
+---
+
+## 🛠️ How We Used Gemini 3
+
+We leverage **four distinct Gemini 3 capabilities** across six integration points:
+
+| Capability | Model | Where It's Used | What It Does |
+|-----------|-------|-----------------|-------------|
+| **Native Audio** | Gemini 3 Native Audio | Lumina Sync | Real-time voice tutoring — AI processes and responds in audio directly |
+| **Text Generation** | Gemini 3 Flash | Lumina Chat, Teacher Assistant, AI Grading | Conversational AI, content creation, automated assessment |
+| **Image Generation** | Gemini 3 Image Gen | Tutor Whiteboard | Generates educational diagrams and graphs during voice sessions |
+| **Tool Use (Search)** | Gemini 3 + Google Search | Session Summary | Finds real educational resources after tutoring sessions |
+
+**Total Gemini 3 integration points in codebase: 11** — including `LuminaSync.tsx`, `LuminaChat.tsx`, `ClassroomView.tsx`, `TeacherAssistant.tsx`, `VisionLab.tsx`, and `SessionSummary.tsx`.
 
 ---
 
